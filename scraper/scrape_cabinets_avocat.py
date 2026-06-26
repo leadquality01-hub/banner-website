@@ -1,6 +1,7 @@
 """
-Scraper de cabinets d'avocat à Paris - Pages Jaunes
-Objectif : constituer une base de 500 cabinets pour prospection par email
+Scraper cabinets d'avocat Paris - Pages Jaunes
+Lance : python scrape_cabinets_avocat.py
+Résultat : cabinets_avocat_paris.xlsx dans le même dossier
 """
 
 import requests
@@ -8,322 +9,274 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import time
 import random
-import json
 import re
 import os
 from datetime import datetime
 
-# ─── Configuration ────────────────────────────────────────────────────────────
-
-BASE_URL = "https://www.pagesjaunes.fr/annuaire/chercher"
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_CSV = os.path.join(OUTPUT_DIR, "cabinets_avocat_paris.csv")
-OUTPUT_JSON = os.path.join(OUTPUT_DIR, "cabinets_avocat_paris.json")
+OUTPUT_XLSX = os.path.join(OUTPUT_DIR, "cabinets_avocat_paris.xlsx")
 TARGET = 500
 
-# Zones géographiques Paris métropole (codes postaux + communes)
 ZONES = [
-    ("avocat", "Paris 1er (75001)"),
-    ("avocat", "Paris 2eme (75002)"),
-    ("avocat", "Paris 3eme (75003)"),
-    ("avocat", "Paris 4eme (75004)"),
-    ("avocat", "Paris 5eme (75005)"),
-    ("avocat", "Paris 6eme (75006)"),
-    ("avocat", "Paris 7eme (75007)"),
-    ("avocat", "Paris 8eme (75008)"),
-    ("avocat", "Paris 9eme (75009)"),
-    ("avocat", "Paris 10eme (75010)"),
-    ("avocat", "Paris 11eme (75011)"),
-    ("avocat", "Paris 12eme (75012)"),
-    ("avocat", "Paris 13eme (75013)"),
-    ("avocat", "Paris 14eme (75014)"),
-    ("avocat", "Paris 15eme (75015)"),
-    ("avocat", "Paris 16eme (75016)"),
-    ("avocat", "Paris 17eme (75017)"),
-    ("avocat", "Paris 18eme (75018)"),
-    ("avocat", "Paris 19eme (75019)"),
-    ("avocat", "Paris 20eme (75020)"),
-    ("avocat", "Boulogne-Billancourt (92100)"),
-    ("avocat", "Neuilly-sur-Seine (92200)"),
-    ("avocat", "Levallois-Perret (92300)"),
-    ("avocat", "Nanterre (92000)"),
-    ("avocat", "Vincennes (94300)"),
-    ("avocat", "Saint-Denis (93200)"),
-    ("avocat", "Montreuil (93100)"),
-    ("avocat", "Versailles (78000)"),
+    "Paris 1er (75001)", "Paris 2eme (75002)", "Paris 3eme (75003)",
+    "Paris 4eme (75004)", "Paris 5eme (75005)", "Paris 6eme (75006)",
+    "Paris 7eme (75007)", "Paris 8eme (75008)", "Paris 9eme (75009)",
+    "Paris 10eme (75010)", "Paris 11eme (75011)", "Paris 12eme (75012)",
+    "Paris 13eme (75013)", "Paris 14eme (75014)", "Paris 15eme (75015)",
+    "Paris 16eme (75016)", "Paris 17eme (75017)", "Paris 18eme (75018)",
+    "Paris 19eme (75019)", "Paris 20eme (75020)",
+    "Boulogne-Billancourt (92100)", "Neuilly-sur-Seine (92200)",
+    "Levallois-Perret (92300)", "Nanterre (92000)", "Vincennes (94300)",
+    "Saint-Denis (93200)", "Montreuil (93100)", "Versailles (78000)",
+    "Courbevoie (92400)", "Issy-les-Moulineaux (92130)",
 ]
 
-HEADERS_LIST = [
-    {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept-Language": "fr-FR,fr;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-    {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-        "Accept-Language": "fr-FR,fr;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-]
+# Headers qui imitent un vrai navigateur Chrome
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
+}
 
-
-# ─── Fonctions de scraping ────────────────────────────────────────────────────
-
-def get_page(quoi: str, ou: str, page: int = 1) -> BeautifulSoup | None:
-    """Récupère une page de résultats Pages Jaunes."""
-    params = {
-        "quoiqui": quoi,
-        "ou": ou,
-        "page": page,
-    }
-    headers = random.choice(HEADERS_LIST)
+def creer_session():
+    """Crée une session avec cookies en visitant d'abord la page d'accueil."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
     try:
-        resp = requests.get(BASE_URL, params=params, headers=headers, timeout=15)
+        print("  Connexion à Pages Jaunes...")
+        session.get("https://www.pagesjaunes.fr", timeout=15)
+        time.sleep(random.uniform(2, 4))
+    except Exception as e:
+        print(f"  Avertissement : {e}")
+    return session
+
+def get_page(session, zone, page=1):
+    url = "https://www.pagesjaunes.fr/annuaire/chercher"
+    params = {"quoiqui": "avocat", "ou": zone, "page": page}
+    try:
+        resp = session.get(url, params=params, timeout=20)
+        print(f"    Status {resp.status_code}")
         if resp.status_code == 200:
             return BeautifulSoup(resp.text, "lxml")
-        print(f"  ⚠️  Status {resp.status_code} pour page {page} - {ou}")
+        elif resp.status_code == 403:
+            print("    Bloqué - pause de 15 secondes...")
+            time.sleep(15)
+            # Recréer la session et réessayer
+            session = creer_session()
+            resp = session.get(url, params=params, timeout=20)
+            if resp.status_code == 200:
+                return BeautifulSoup(resp.text, "lxml")
         return None
-    except requests.RequestException as e:
-        print(f"  ❌ Erreur réseau : {e}")
+    except Exception as e:
+        print(f"    Erreur : {e}")
         return None
 
-
-def extract_email_from_text(text: str) -> str:
-    """Extrait un email depuis un bloc de texte."""
-    match = re.search(r"[\w.\-+]+@[\w.\-]+\.[a-zA-Z]{2,}", text)
+def extraire_email(texte):
+    match = re.search(r"[\w.\-+]+@[\w.\-]+\.[a-zA-Z]{2,}", texte)
     return match.group(0) if match else ""
 
-
-def parse_listings(soup: BeautifulSoup) -> list[dict]:
-    """Extrait les cabinets depuis une page de résultats."""
-    results = []
-
-    # Pages Jaunes utilise des articles avec class "bi-item" ou "bi-pro"
-    cards = soup.select("ul#listResults li.bi-item, ul#listResults li.bi-pro, article.bi-item")
-
+def parser_resultats(soup):
+    cabinets = []
+    cards = soup.select("li.bi-item, li.bi-pro, article.bi-item")
     if not cards:
-        # Sélecteur de secours plus large
-        cards = soup.select("[class*='bi-item'], [class*='bi-pro']")
-
+        cards = soup.select("[class*='bi-item']")
     for card in cards:
-        cabinet = {}
-
-        # Nom du cabinet
-        name_tag = card.select_one("a.bi-denomination, h3.bi-denomination a, .denomination-links a")
-        cabinet["nom"] = name_tag.get_text(strip=True) if name_tag else ""
-
-        # Adresse
-        addr_tag = card.select_one("address, .bi-address, [class*='address']")
-        cabinet["adresse"] = addr_tag.get_text(" ", strip=True) if addr_tag else ""
-
-        # Téléphone
-        tel_tag = card.select_one("[class*='phone'], [class*='tel'], a[href^='tel:']")
+        nom_tag = card.select_one("a.bi-denomination, h3 a, .denomination-links a, a[class*='denomination']")
+        nom = nom_tag.get_text(strip=True) if nom_tag else ""
+        if not nom:
+            continue
+        adr_tag = card.select_one("address, [class*='address']")
+        adresse = adr_tag.get_text(" ", strip=True) if adr_tag else ""
+        tel_tag = card.select_one("a[href^='tel:'], [class*='phone']")
+        telephone = ""
         if tel_tag:
-            cabinet["telephone"] = tel_tag.get("href", "").replace("tel:", "").strip() or tel_tag.get_text(strip=True)
-        else:
-            cabinet["telephone"] = ""
+            telephone = tel_tag.get("href", "").replace("tel:", "") or tel_tag.get_text(strip=True)
+        email = extraire_email(card.get_text())
+        site_tag = card.select_one("a[class*='site'], a[class*='web']")
+        site = site_tag.get("href", "") if site_tag else ""
+        lien_tag = card.select_one("a.bi-denomination, h3 a")
+        href = lien_tag.get("href", "") if lien_tag else ""
+        fiche = "https://www.pagesjaunes.fr" + href if href.startswith("/") else ""
+        cabinets.append({
+            "nom": nom,
+            "adresse": adresse,
+            "telephone": telephone.strip(),
+            "email": email,
+            "site_web": site,
+            "url_fiche": fiche,
+        })
+    return cabinets
 
-        # Site web
-        web_tag = card.select_one("a[href*='http'][class*='site'], a[class*='web']")
-        cabinet["site_web"] = web_tag.get("href", "") if web_tag else ""
-
-        # Email (rarement affiché directement)
-        email_raw = card.get_text()
-        cabinet["email"] = extract_email_from_text(email_raw)
-
-        # Spécialité / description
-        desc_tag = card.select_one(".bi-activite, [class*='activite'], [class*='activites']")
-        cabinet["specialite"] = desc_tag.get_text(" ", strip=True) if desc_tag else ""
-
-        # URL de la fiche détaillée
-        link_tag = card.select_one("a.bi-denomination, h3 a, a[class*='denomination']")
-        cabinet["url_fiche"] = "https://www.pagesjaunes.fr" + link_tag["href"] if link_tag and link_tag.get("href", "").startswith("/") else ""
-
-        if cabinet["nom"]:
-            results.append(cabinet)
-
-    return results
-
-
-def get_total_pages(soup: BeautifulSoup) -> int:
-    """Récupère le nombre total de pages de résultats."""
-    pagination = soup.select_one("[class*='pagination'] [class*='last'], .pagination li:last-child a")
-    if pagination:
-        try:
-            return int(re.search(r"\d+", pagination.get_text()).group())
-        except Exception:
-            pass
-    # Cherche aussi dans les métadonnées
-    meta = soup.select_one("[data-nb-results], [data-total]")
-    if meta:
-        total = meta.get("data-nb-results") or meta.get("data-total")
-        if total:
-            return max(1, int(total) // 20)
-    return 5  # Valeur par défaut conservative
-
-
-# ─── Scraper de fiche détaillée (pour récupérer l'email) ─────────────────────
-
-def scrape_detail(url: str) -> dict:
-    """Visite la fiche d'un cabinet pour récupérer email et infos supplémentaires."""
+def scraper_fiche(session, url):
+    """Visite la fiche pour récupérer email et site web."""
     if not url:
         return {}
-    headers = random.choice(HEADERS_LIST)
     try:
-        resp = requests.get(url, headers=headers, timeout=15)
+        time.sleep(random.uniform(1, 2))
+        resp = session.get(url, timeout=15)
         if resp.status_code != 200:
             return {}
         soup = BeautifulSoup(resp.text, "lxml")
-        detail = {}
-
-        # Email
         email_tag = soup.select_one("a[href^='mailto:']")
-        if email_tag:
-            detail["email"] = email_tag["href"].replace("mailto:", "").strip()
-        else:
-            detail["email"] = extract_email_from_text(soup.get_text())
-
-        # Site web (parfois masqué en listing)
-        site_tag = soup.select_one("a[class*='site-web'], a[class*='website']")
-        if site_tag:
-            detail["site_web"] = site_tag.get("href", "")
-
-        return detail
+        email = email_tag["href"].replace("mailto:", "").strip() if email_tag else extraire_email(soup.get_text())
+        site_tag = soup.select_one("a[class*='site-web'], a[class*='website'], a[href*='http'][class*='site']")
+        site = site_tag.get("href", "") if site_tag else ""
+        return {"email": email, "site_web": site}
     except Exception:
         return {}
 
+def exporter_excel(donnees):
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
 
-# ─── Boucle principale ────────────────────────────────────────────────────────
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Cabinets Avocat Paris"
 
-def run_scraper():
-    all_cabinets = []
-    seen_names = set()
+        BLEU = "1F3864"
+        BLEU_CLAIR = "D6E4F0"
+        thin = Side(border_style="thin", color="CCCCCC")
+        bordure = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    print(f"\n{'='*60}")
-    print(f"  Scraper Cabinets d'Avocat - Paris Métropole")
-    print(f"  Objectif : {TARGET} cabinets")
-    print(f"  Démarrage : {datetime.now().strftime('%H:%M:%S')}")
-    print(f"{'='*60}\n")
+        # Titre
+        ws.merge_cells("A1:I1")
+        c = ws["A1"]
+        c.value = f"CABINETS D'AVOCAT - PARIS MÉTROPOLE ({len(donnees)} contacts)"
+        c.font = Font(bold=True, size=13, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor=BLEU)
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 25
 
-    for quoi, ou in ZONES:
-        if len(all_cabinets) >= TARGET:
+        # En-têtes
+        entetes = ["N°", "Nom", "Adresse", "Téléphone", "Email", "Site web", "Zone", "Statut", "Notes"]
+        for i, h in enumerate(entetes, 1):
+            c = ws.cell(row=2, column=i, value=h)
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = PatternFill("solid", fgColor=BLEU)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = bordure
+        ws.row_dimensions[2].height = 18
+        ws.freeze_panes = "A3"
+
+        # Données
+        for idx, d in enumerate(donnees, 1):
+            row = idx + 2
+            vals = [
+                idx, d.get("nom",""), d.get("adresse",""), d.get("telephone",""),
+                d.get("email",""), d.get("site_web",""), d.get("zone",""), "À contacter", ""
+            ]
+            bg = BLEU_CLAIR if idx % 2 == 0 else "FFFFFF"
+            for col, val in enumerate(vals, 1):
+                c = ws.cell(row=row, column=col, value=val)
+                c.font = Font(size=10)
+                c.border = bordure
+                c.alignment = Alignment(horizontal="center" if col in (1,4,8) else "left", vertical="center")
+                if col == 5 and val:  # Email en vert
+                    c.fill = PatternFill("solid", fgColor="E8F5E9")
+                elif col == 5:        # Email vide en orange
+                    c.fill = PatternFill("solid", fgColor="FFF3E0")
+                else:
+                    c.fill = PatternFill("solid", fgColor=bg)
+            ws.row_dimensions[row].height = 16
+
+        # Largeurs
+        for i, w in enumerate([5, 38, 35, 16, 32, 32, 25, 14, 20], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        ws.auto_filter.ref = f"A2:I{len(donnees)+2}"
+        wb.save(OUTPUT_XLSX)
+        return True
+    except Exception as e:
+        print(f"Erreur Excel : {e}")
+        # Fallback CSV
+        pd.DataFrame(donnees).to_csv(OUTPUT_XLSX.replace(".xlsx", ".csv"), index=False, encoding="utf-8-sig")
+        return False
+
+# ─── PROGRAMME PRINCIPAL ──────────────────────────────────────────────────────
+
+print("=" * 60)
+print("  SCRAPER CABINETS D'AVOCAT - PARIS MÉTROPOLE")
+print(f"  Démarrage : {datetime.now().strftime('%H:%M:%S')}")
+print("=" * 60)
+
+session = creer_session()
+tous_cabinets = []
+noms_vus = set()
+
+for zone in ZONES:
+    if len(tous_cabinets) >= TARGET:
+        break
+
+    print(f"\n📍 {zone}")
+    soup = get_page(session, zone, page=1)
+    if not soup:
+        continue
+
+    # Détecter nombre de pages
+    nb_pages = 1
+    pag = soup.select_one("[class*='pagination'] [class*='last'], .pagination li:last-child a")
+    if pag:
+        try:
+            nb_pages = int(re.search(r"\d+", pag.get_text()).group())
+        except Exception:
+            nb_pages = 5
+
+    for page in range(1, min(nb_pages + 1, 10)):
+        if len(tous_cabinets) >= TARGET:
             break
-
-        print(f"\n📍 Zone : {ou}")
-        soup = get_page(quoi, ou, page=1)
-        if not soup:
-            time.sleep(3)
-            continue
-
-        total_pages = get_total_pages(soup)
-        print(f"   → {total_pages} page(s) détectée(s)")
-
-        for page_num in range(1, min(total_pages + 1, 15)):  # Max 15 pages par zone
-            if len(all_cabinets) >= TARGET:
+        if page > 1:
+            soup = get_page(session, zone, page)
+            if not soup:
                 break
+            time.sleep(random.uniform(3, 6))
 
-            if page_num > 1:
-                soup = get_page(quoi, ou, page=page_num)
-                if not soup:
-                    break
-                time.sleep(random.uniform(2.0, 4.5))  # Pause respectueuse
+        nouveaux = 0
+        for cab in parser_resultats(soup):
+            cle = cab["nom"].lower().strip()
+            if cle and cle not in noms_vus:
+                noms_vus.add(cle)
+                cab["zone"] = zone
+                tous_cabinets.append(cab)
+                nouveaux += 1
 
-            listings = parse_listings(soup)
+        print(f"    Page {page} : +{nouveaux} | Total : {len(tous_cabinets)}/{TARGET}")
+        time.sleep(random.uniform(2, 5))
 
-            new_count = 0
-            for cab in listings:
-                name_key = cab["nom"].lower().strip()
-                if name_key and name_key not in seen_names:
-                    seen_names.add(name_key)
-                    cab["zone"] = ou
-                    all_cabinets.append(cab)
-                    new_count += 1
+    time.sleep(random.uniform(4, 8))
 
-            print(f"   Page {page_num} : +{new_count} cabinets | Total : {len(all_cabinets)}/{TARGET}")
+# Enrichissement emails via fiches détaillées
+print(f"\n📧 Recherche d'emails sur les fiches individuelles...")
+enrichis = 0
+for i, cab in enumerate(tous_cabinets):
+    if cab.get("email") or not cab.get("url_fiche"):
+        continue
+    detail = scraper_fiche(session, cab["url_fiche"])
+    if detail.get("email"):
+        cab["email"] = detail["email"]
+        enrichis += 1
+    if detail.get("site_web") and not cab.get("site_web"):
+        cab["site_web"] = detail["site_web"]
+    if i % 50 == 0 and i > 0:
+        print(f"    {i}/{len(tous_cabinets)} fiches visitées — {enrichis} emails trouvés")
 
-            # Pause entre pages
-            time.sleep(random.uniform(1.5, 3.0))
+# Export
+print(f"\n✅ {len(tous_cabinets)} cabinets collectés — {enrichis} emails récupérés")
+ok = exporter_excel(tous_cabinets)
 
-        # Pause entre zones
-        time.sleep(random.uniform(3.0, 6.0))
-
-    print(f"\n{'='*60}")
-    print(f"  Scraping terminé : {len(all_cabinets)} cabinets collectés")
-    print(f"{'='*60}\n")
-
-    # ─── Phase 2 : enrichissement via fiches détaillées ──────────────────────
-    print("📧 Enrichissement des emails via fiches détaillées...")
-    enriched = 0
-    for i, cab in enumerate(all_cabinets):
-        if cab.get("email") or not cab.get("url_fiche"):
-            continue
-        detail = scrape_detail(cab["url_fiche"])
-        if detail.get("email"):
-            cab["email"] = detail["email"]
-            enriched += 1
-        if detail.get("site_web") and not cab.get("site_web"):
-            cab["site_web"] = detail["site_web"]
-        if i % 50 == 0 and i > 0:
-            print(f"   → {i}/{len(all_cabinets)} fiches visitées, {enriched} emails trouvés")
-        time.sleep(random.uniform(1.0, 2.5))
-
-    print(f"   ✅ {enriched} emails enrichis\n")
-
-    return all_cabinets
-
-
-# ─── Export ───────────────────────────────────────────────────────────────────
-
-def export_results(cabinets: list[dict]):
-    if not cabinets:
-        print("⚠️  Aucun résultat à exporter.")
-        return
-
-    df = pd.DataFrame(cabinets, columns=[
-        "nom", "adresse", "telephone", "email", "site_web", "specialite", "zone", "url_fiche"
-    ])
-
-    # Nettoyage
-    df = df.drop_duplicates(subset=["nom"]).reset_index(drop=True)
-    df["nom"] = df["nom"].str.strip()
-    df["email"] = df["email"].str.lower().str.strip()
-
-    # Colonne statut pour le suivi des envois
-    df["statut_contact"] = "à contacter"
-    df["date_contact"] = ""
-    df["notes"] = ""
-
-    # Export CSV (encodage UTF-8 pour Excel)
-    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-
-    # Export JSON
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(cabinets, f, ensure_ascii=False, indent=2)
-
-    # Statistiques
-    total = len(df)
-    avec_email = df["email"].notna() & (df["email"] != "")
-    avec_tel = df["telephone"].notna() & (df["telephone"] != "")
-    avec_site = df["site_web"].notna() & (df["site_web"] != "")
-
-    print(f"{'='*60}")
-    print(f"  RÉSULTATS EXPORTÉS")
-    print(f"{'='*60}")
-    print(f"  📊 Total cabinets        : {total}")
-    print(f"  📧 Avec email            : {avec_email.sum()} ({avec_email.mean()*100:.0f}%)")
-    print(f"  📞 Avec téléphone        : {avec_tel.sum()} ({avec_tel.mean()*100:.0f}%)")
-    print(f"  🌐 Avec site web         : {avec_site.sum()} ({avec_site.mean()*100:.0f}%)")
-    print(f"  💾 CSV  → {OUTPUT_CSV}")
-    print(f"  💾 JSON → {OUTPUT_JSON}")
-    print(f"{'='*60}\n")
-
-    # Aperçu
-    print("Aperçu des 5 premiers résultats :")
-    print(df[["nom", "adresse", "telephone", "email", "zone"]].head().to_string(index=False))
-
-
-# ─── Point d'entrée ───────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    cabinets = run_scraper()
-    export_results(cabinets)
+print("\n" + "=" * 60)
+if ok:
+    print(f"  FICHIER EXCEL CRÉÉ : cabinets_avocat_paris.xlsx")
+else:
+    print(f"  FICHIER CSV CRÉÉ : cabinets_avocat_paris.csv")
+print(f"  Dans le dossier : {OUTPUT_DIR}")
+print("=" * 60)
