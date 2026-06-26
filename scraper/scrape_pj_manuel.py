@@ -71,20 +71,25 @@ async def attendre_resolution_captcha(page):
     print("  ⚠️  CAPTCHA CLOUDFLARE DÉTECTÉ")
     print("="*55)
     print("  👉 Dans la fenêtre Chrome qui est ouverte :")
-    print("     1. Clique sur la case du CAPTCHA")
-    print("     2. Suis les instructions")
-    print("     3. Attends que la page des résultats s'affiche")
-    print("  Le script reprend automatiquement ensuite.")
+    print("     1. Clique sur la case 'Je ne suis pas un robot'")
+    print("        ou coche la case Cloudflare")
+    print("     2. Attends que la page Pages Jaunes s'affiche")
     print("="*55)
+    print("\n  ⏎  Reviens ici et appuie sur ENTRÉE une fois")
+    print("     que la page des résultats est affichée.")
+    print()
 
-    # Attendre max 3 minutes que le CAPTCHA soit résolu
-    for _ in range(180):
-        await asyncio.sleep(1)
-        if not await est_cloudflare(page):
-            print("  ✅ CAPTCHA résolu ! Scraping en cours...")
-            return True
-    print("  ❌ Timeout - CAPTCHA non résolu en 3 minutes.")
-    return False
+    # Attendre que l'utilisateur appuie sur Entrée
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, input, "  >>> Appuie sur ENTRÉE pour continuer : ")
+
+    await asyncio.sleep(2)
+    if not await est_cloudflare(page):
+        print("  ✅ OK ! Scraping en cours...")
+        return True
+    else:
+        print("  ⚠️  La page semble encore bloquée, on continue quand même...")
+        return True
 
 async def scraper_zone(page, zone, tous, noms_vus):
     nouveaux_total = 0
